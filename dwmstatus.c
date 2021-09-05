@@ -17,9 +17,8 @@
 
 #include <X11/Xlib.h>
 
-char *tzargentina = "America/Buenos_Aires";
+char *tzargentina = "Asia/Shanghai";
 char *tzutc = "UTC";
-char *tzberlin = "Europe/Berlin";
 
 static Display *dpy;
 
@@ -176,36 +175,111 @@ gettemperature(char *base, char *sensor)
 }
 
 int
+parse_netdev(unsigned long long int *receivedabs, unsigned long long int *sentabs)
+{
+	char buf[255];
+	char *datastart;
+	static int bufsize;
+	int rval;
+	FILE *devfd;
+	unsigned long long int receivedacc, sentacc;
+
+	bufsize = 255;
+	devfd = fopen("/proc/net/dev", "r");
+	rval = 1;
+
+	// Ignore the first two lines of the file
+	fgets(buf, bufsize, devfd);
+	fgets(buf, bufsize, devfd);
+
+	while (fgets(buf, bufsize, devfd)) {
+		if ((datastart = strstr(buf, "lo:")) == NULL) {
+			datastart = strstr(buf, ":");
+
+			// With thanks to the conky project at http://conky.sourceforge.net/
+			sscanf(datastart + 1, "%llu  %*d     %*d  %*d  %*d  %*d   %*d        %*d       %llu",\
+				&receivedacc, &sentacc);
+			*receivedabs += receivedacc;
+			*sentabs += sentacc;
+			rval = 0;
+		}
+	}
+
+	fclose(devfd);
+	return rval;
+}
+
+void
+calculate_speed(char *speedstr, unsigned long long int newval, unsigned long long int oldval)
+{
+	double speed;
+	speed = (newval - oldval) / 1024.0;
+	if (speed > 1024.0) {
+		speed /= 1024.0;
+		sprintf(speedstr, "%.3f MB/s", speed);
+	} else {
+		sprintf(speedstr, "%.2f KB/s", speed);
+	}
+}
+
+char *
+get_netusage(unsigned long long int *rec, unsigned long long int *sent)
+{
+	unsigned long long int newrec, newsent;
+	newrec = newsent = 0;
+	char downspeedstr[15], upspeedstr[15];
+	static char retstr[48];
+	int retval;
+
+	retval = parse_netdev(&newrec, &newsent);
+	if (retval) {
+		fprintf(stdout, "Error when parsing /proc/net/dev file.\n");
+		exit(1);
+	}
+
+	calculate_speed(downspeedstr, newrec, *rec);
+	calculate_speed(upspeedstr, newsent, *sent);
+
+	sprintf(retstr, " %s  %s", downspeedstr, upspeedstr);
+
+	*rec = newrec;
+	*sent = newsent;
+	return retstr;
+}
+
+#define SEPARATOR_STR "^v^^c#55cdfc^ | ^t^"
+
+int
 main(void)
 {
 	char *status;
 	char *avgs;
 	char *bat;
 	char *bat1;
+	char *databar;
 	char *tmar;
-	char *tmutc;
-	char *tmbln;
 	char *t0, *t1, *t2;
+	char *netstats;
+	static unsigned long long int rec = 0, sent = 0;
 
 	if (!(dpy = XOpenDisplay(NULL))) {
 		fprintf(stderr, "dwmstatus: cannot open display.\n");
 		return 1;
 	}
 
-	for (;;sleep(60)) {
+	for (;;sleep(1)) {
 		avgs = loadavg();
 		bat = getbattery("/sys/class/power_supply/BAT0");
 		bat1 = getbattery("/sys/class/power_supply/BAT1");
+		databar = mktimes("%F W:%W", tzargentina);
 		tmar = mktimes("%H:%M", tzargentina);
-		tmutc = mktimes("%H:%M", tzutc);
-		tmbln = mktimes("KW %W %a %d %b %H:%M %Z %Y", tzberlin);
 		t0 = gettemperature("/sys/devices/virtual/hwmon/hwmon0", "temp1_input");
 		t1 = gettemperature("/sys/devices/virtual/hwmon/hwmon2", "temp1_input");
 		t2 = gettemperature("/sys/devices/virtual/hwmon/hwmon4", "temp1_input");
+		netstats = get_netusage(&rec, &sent);
 
-		status = smprintf("T:%s|%s|%s L:%s B:%s|%s A:%s U:%s %s",
-				t0, t1, t2, avgs, bat, bat1, tmar, tmutc,
-				tmbln);
+		status = smprintf("%s "SEPARATOR_STR"  %s "SEPARATOR_STR"  %s "SEPARATOR_STR"  %s",
+				netstats, avgs, databar, tmar);
 		setstatus(status);
 
 		free(t0);
@@ -214,9 +288,8 @@ main(void)
 		free(avgs);
 		free(bat);
 		free(bat1);
+		free(databar);
 		free(tmar);
-		free(tmutc);
-		free(tmbln);
 		free(status);
 	}
 
