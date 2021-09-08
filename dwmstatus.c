@@ -210,15 +210,15 @@ parse_netdev(unsigned long long int *receivedabs, unsigned long long int *sentab
 }
 
 void
-calculate_speed(char *speedstr, unsigned long long int newval, unsigned long long int oldval)
+calculate_speed(char *speedstr, size_t len, unsigned long long int newval, unsigned long long int oldval)
 {
 	double speed;
 	speed = (newval - oldval) / 1024.0;
 	if (speed > 1024.0) {
 		speed /= 1024.0;
-		sprintf(speedstr, "%.3f MB/s", speed);
+		snprintf(speedstr, len, "%.3f MB/s", speed);
 	} else {
-		sprintf(speedstr, "%.2f KB/s", speed);
+		snprintf(speedstr, len, "%.2f KB/s", speed);
 	}
 }
 
@@ -237,10 +237,10 @@ get_netusage(unsigned long long int *rec, unsigned long long int *sent)
 		exit(1);
 	}
 
-	calculate_speed(downspeedstr, newrec, *rec);
-	calculate_speed(upspeedstr, newsent, *sent);
+	calculate_speed(downspeedstr, sizeof(downspeedstr), newrec, *rec);
+	calculate_speed(upspeedstr, sizeof(upspeedstr), newsent, *sent);
 
-	sprintf(retstr, " %s  %s", downspeedstr, upspeedstr);
+	snprintf(retstr, sizeof(retstr), " %s  %s", downspeedstr, upspeedstr);
 
 	*rec = newrec;
 	*sent = newsent;
